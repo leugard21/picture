@@ -1,9 +1,11 @@
 #include "MainWindow.h"
+#include "AdjustmentsPanel.h"
 #include "ImageCanvas.h"
 #include "ResizeDialog.h"
 #include "RotateDialog.h"
 
 #include <QCloseEvent>
+#include <QDockWidget>
 #include <QFileDialog>
 #include <QKeyEvent>
 #include <QLabel>
@@ -13,6 +15,7 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_canvas(new ImageCanvas(this)),
+      m_adjustmentsPanel(nullptr), m_adjustmentsDock(nullptr),
       m_statusLabel(new QLabel(this)), m_zoomLabel(new QLabel(this)),
       m_currentFilePath(), m_isModified(false), m_zoomInAction(nullptr),
       m_zoomOutAction(nullptr), m_fitToWindowAction(nullptr),
@@ -20,13 +23,14 @@ MainWindow::MainWindow(QWidget *parent)
       m_cropAction(nullptr), m_rotate90CWAction(nullptr),
       m_rotate90CCWAction(nullptr), m_rotate180Action(nullptr),
       m_rotateArbitraryAction(nullptr), m_flipHorizontalAction(nullptr),
-      m_flipVerticalAction(nullptr) {
+      m_flipVerticalAction(nullptr), m_adjustmentsAction(nullptr) {
   setCentralWidget(m_canvas);
   setMinimumSize(800, 600);
   resize(1200, 800);
 
   setupMenuBar();
   setupStatusBar();
+  setupDockWidgets();
   updateWindowTitle();
 
   connect(m_canvas, &ImageCanvas::imageLoaded, this,
@@ -37,6 +41,8 @@ MainWindow::MainWindow(QWidget *parent)
           &MainWindow::onZoomChanged);
   connect(m_canvas, &ImageCanvas::cropModeChanged, this,
           &MainWindow::onCropModeChanged);
+  connect(m_canvas, &ImageCanvas::adjustmentModeChanged, this,
+          &MainWindow::onAdjustmentModeChanged);
 }
 
 void MainWindow::setupMenuBar() {
@@ -95,23 +101,32 @@ void MainWindow::setupMenuBar() {
 
   imageMenu->addSeparator();
 
+  m_adjustmentsAction = imageMenu->addAction(tr("&Adjustments..."));
+  m_adjustmentsAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_U));
+  m_adjustmentsAction->setEnabled(false);
+  m_adjustmentsAction->setCheckable(true);
+  connect(m_adjustmentsAction, &QAction::triggered, this,
+          &MainWindow::onToggleAdjustments);
+
+  imageMenu->addSeparator();
+
   QMenu *rotateMenu = imageMenu->addMenu(tr("&Rotate"));
 
-  m_rotate90CWAction = rotateMenu->addAction(tr("90° &Clockwise"));
+  m_rotate90CWAction = rotateMenu->addAction(tr("90 &Clockwise"));
   m_rotate90CWAction->setShortcut(
       QKeySequence(Qt::CTRL | Qt::Key_BracketRight));
   m_rotate90CWAction->setEnabled(false);
   connect(m_rotate90CWAction, &QAction::triggered, this,
           &MainWindow::onRotate90CW);
 
-  m_rotate90CCWAction = rotateMenu->addAction(tr("90° Counter-Clock&wise"));
+  m_rotate90CCWAction = rotateMenu->addAction(tr("90 Counter-Clock&wise"));
   m_rotate90CCWAction->setShortcut(
       QKeySequence(Qt::CTRL | Qt::Key_BracketLeft));
   m_rotate90CCWAction->setEnabled(false);
   connect(m_rotate90CCWAction, &QAction::triggered, this,
           &MainWindow::onRotate90CCW);
 
-  m_rotate180Action = rotateMenu->addAction(tr("&180°"));
+  m_rotate180Action = rotateMenu->addAction(tr("&180"));
   m_rotate180Action->setEnabled(false);
   connect(m_rotate180Action, &QAction::triggered, this,
           &MainWindow::onRotate180);
@@ -174,6 +189,34 @@ void MainWindow::setupStatusBar() {
   statusBar()->addPermanentWidget(m_zoomLabel);
 }
 
+void MainWindow::setupDockWidgets() {
+  m_adjustmentsPanel = new AdjustmentsPanel(this);
+
+  m_adjustmentsDock = new QDockWidget(tr("Adjustments"), this);
+  m_adjustmentsDock->setWidget(m_adjustmentsPanel);
+  m_adjustmentsDock->setAllowedAreas(Qt::LeftDockWidgetArea |
+                                     Qt::RightDockWidgetArea);
+  m_adjustmentsDock->setVisible(false);
+  addDockWidget(Qt::RightDockWidgetArea, m_adjustmentsDock);
+
+  connect(m_adjustmentsPanel, &AdjustmentsPanel::adjustmentsChanged, this,
+          &MainWindow::onAdjustmentsChanged);
+  connect(m_adjustmentsPanel, &AdjustmentsPanel::applyRequested, this,
+          &MainWindow::onApplyAdjustments);
+  connect(m_adjustmentsPanel, &AdjustmentsPanel::resetRequested, this,
+          &MainWindow::onResetAdjustments);
+  connect(m_adjustmentsDock, &QDockWidget::visibilityChanged,
+          [this](bool visible) {
+            m_adjustmentsAction->setChecked(visible);
+            if (visible && m_canvas->hasImage() && !m_canvas->isAdjusting()) {
+              m_canvas->startAdjustmentMode();
+            } else if (!visible && m_canvas->isAdjusting()) {
+              m_canvas->cancelAdjustments();
+              m_adjustmentsPanel->reset();
+            }
+          });
+}
+
 void MainWindow::updateWindowTitle() {
   QString title = "Picture";
 
@@ -202,6 +245,7 @@ void MainWindow::updateStatusBar() {
 void MainWindow::updateViewActions() {
   bool hasImage = m_canvas->hasImage();
   bool notCropping = !m_canvas->isCropping();
+  bool notAdjusting = !m_canvas->isAdjusting();
 
   m_zoomInAction->setEnabled(hasImage && notCropping);
   m_zoomOutAction->setEnabled(hasImage && notCropping);
@@ -212,15 +256,17 @@ void MainWindow::updateViewActions() {
 void MainWindow::updateImageActions() {
   bool hasImage = m_canvas->hasImage();
   bool notCropping = !m_canvas->isCropping();
+  bool notAdjusting = !m_canvas->isAdjusting();
 
-  m_resizeAction->setEnabled(hasImage && notCropping);
-  m_cropAction->setEnabled(hasImage);
-  m_rotate90CWAction->setEnabled(hasImage && notCropping);
-  m_rotate90CCWAction->setEnabled(hasImage && notCropping);
-  m_rotate180Action->setEnabled(hasImage && notCropping);
-  m_rotateArbitraryAction->setEnabled(hasImage && notCropping);
-  m_flipHorizontalAction->setEnabled(hasImage && notCropping);
-  m_flipVerticalAction->setEnabled(hasImage && notCropping);
+  m_resizeAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_cropAction->setEnabled(hasImage && notAdjusting);
+  m_adjustmentsAction->setEnabled(hasImage && notCropping);
+  m_rotate90CWAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_rotate90CCWAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_rotate180Action->setEnabled(hasImage && notCropping && notAdjusting);
+  m_rotateArbitraryAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_flipHorizontalAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_flipVerticalAction->setEnabled(hasImage && notCropping && notAdjusting);
 
   if (m_canvas->isCropping()) {
     m_cropAction->setText(tr("&Apply Crop"));
@@ -280,6 +326,7 @@ void MainWindow::onNewFile() {
   m_canvas->clearImage();
   m_currentFilePath.clear();
   m_isModified = false;
+  m_adjustmentsDock->setVisible(false);
   updateWindowTitle();
   updateStatusBar();
   updateViewActions();
@@ -303,6 +350,7 @@ void MainWindow::onOpenFile() {
   if (m_canvas->loadImage(filePath)) {
     m_currentFilePath = filePath;
     m_isModified = false;
+    m_adjustmentsDock->setVisible(false);
     updateWindowTitle();
     updateStatusBar();
     updateViewActions();
@@ -360,6 +408,7 @@ void MainWindow::onCloseFile() {
   m_canvas->clearImage();
   m_currentFilePath.clear();
   m_isModified = false;
+  m_adjustmentsDock->setVisible(false);
   updateWindowTitle();
   updateStatusBar();
   updateViewActions();
@@ -421,6 +470,26 @@ void MainWindow::onFlipHorizontal() { m_canvas->flipHorizontal(); }
 
 void MainWindow::onFlipVertical() { m_canvas->flipVertical(); }
 
+void MainWindow::onToggleAdjustments() {
+  bool visible = !m_adjustmentsDock->isVisible();
+  m_adjustmentsDock->setVisible(visible);
+}
+
+void MainWindow::onAdjustmentsChanged(int brightness, int contrast,
+                                      int saturation, int hue) {
+  m_canvas->setPreviewAdjustments(brightness, contrast, saturation, hue);
+}
+
+void MainWindow::onApplyAdjustments() {
+  m_canvas->applyAdjustments();
+  m_adjustmentsPanel->reset();
+  m_adjustmentsDock->setVisible(false);
+}
+
+void MainWindow::onResetAdjustments() {
+  m_canvas->setPreviewAdjustments(0, 0, 0, 0);
+}
+
 void MainWindow::onZoomIn() { m_canvas->zoomIn(); }
 
 void MainWindow::onZoomOut() { m_canvas->zoomOut(); }
@@ -449,6 +518,12 @@ void MainWindow::onZoomChanged(qreal level) {
 
 void MainWindow::onCropModeChanged(bool cropping) {
   Q_UNUSED(cropping);
+  updateViewActions();
+  updateImageActions();
+}
+
+void MainWindow::onAdjustmentModeChanged(bool adjusting) {
+  Q_UNUSED(adjusting);
   updateViewActions();
   updateImageActions();
 }

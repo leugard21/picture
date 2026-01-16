@@ -49,12 +49,20 @@ public:
   void flipHorizontal();
   void flipVertical();
 
+  void startAdjustmentMode();
+  void setPreviewAdjustments(int brightness, int contrast, int saturation,
+                             int hue);
+  void applyAdjustments();
+  void cancelAdjustments();
+  [[nodiscard]] bool isAdjusting() const;
+
 signals:
   void imageLoaded(const QString &path);
   void imageSaved(const QString &path);
   void imageModified();
   void zoomChanged(qreal level);
   void cropModeChanged(bool cropping);
+  void adjustmentModeChanged(bool adjusting);
 
 protected:
   void paintEvent(QPaintEvent *event) override;
@@ -73,11 +81,13 @@ private:
   void updateCropOverlay();
 
   QImage m_image;
+  QImage m_originalImage;
   QPixmap m_displayPixmap;
   qreal m_zoomLevel;
   QPoint m_panOffset;
   QPoint m_lastMousePos;
   bool m_isPanning;
+  bool m_isAdjusting;
   CropOverlay *m_cropOverlay;
 };
 

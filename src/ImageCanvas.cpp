@@ -1,5 +1,6 @@
 #include "ImageCanvas.h"
 #include "CropOverlay.h"
+#include "ImageProcessor.h"
 
 #include <QFileInfo>
 #include <QImageReader>
@@ -10,9 +11,9 @@
 #include <algorithm>
 
 ImageCanvas::ImageCanvas(QWidget *parent)
-    : QWidget(parent), m_image(), m_displayPixmap(), m_zoomLevel(1.0),
-      m_panOffset(0, 0), m_lastMousePos(), m_isPanning(false),
-      m_cropOverlay(nullptr) {
+    : QWidget(parent), m_image(), m_originalImage(), m_displayPixmap(),
+      m_zoomLevel(1.0), m_panOffset(0, 0), m_lastMousePos(), m_isPanning(false),
+      m_isAdjusting(false), m_cropOverlay(nullptr) {
   setMinimumSize(200, 200);
   setAutoFillBackground(true);
   setMouseTracking(true);
@@ -294,6 +295,54 @@ void ImageCanvas::flipVertical() {
   update();
   emit imageModified();
 }
+
+void ImageCanvas::startAdjustmentMode() {
+  if (m_image.isNull() || m_isAdjusting) {
+    return;
+  }
+
+  m_originalImage = m_image;
+  m_isAdjusting = true;
+  emit adjustmentModeChanged(true);
+}
+
+void ImageCanvas::setPreviewAdjustments(int brightness, int contrast,
+                                        int saturation, int hue) {
+  if (!m_isAdjusting || m_originalImage.isNull()) {
+    return;
+  }
+
+  m_image = ImageProcessor::applyAdjustments(m_originalImage, brightness,
+                                             contrast, saturation, hue);
+  updateDisplayPixmap();
+  update();
+}
+
+void ImageCanvas::applyAdjustments() {
+  if (!m_isAdjusting) {
+    return;
+  }
+
+  m_originalImage = QImage();
+  m_isAdjusting = false;
+  emit imageModified();
+  emit adjustmentModeChanged(false);
+}
+
+void ImageCanvas::cancelAdjustments() {
+  if (!m_isAdjusting) {
+    return;
+  }
+
+  m_image = m_originalImage;
+  m_originalImage = QImage();
+  m_isAdjusting = false;
+  updateDisplayPixmap();
+  update();
+  emit adjustmentModeChanged(false);
+}
+
+bool ImageCanvas::isAdjusting() const { return m_isAdjusting; }
 
 void ImageCanvas::paintEvent(QPaintEvent *event) {
   Q_UNUSED(event);

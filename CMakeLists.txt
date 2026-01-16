@@ -23,6 +23,8 @@ set(SOURCES
     src/ResizeDialog.cpp
     src/CropOverlay.cpp
     src/RotateDialog.cpp
+    src/ImageProcessor.cpp
+    src/AdjustmentsPanel.cpp
 )
 
 set(HEADERS
@@ -31,6 +33,8 @@ set(HEADERS
     src/ResizeDialog.h
     src/CropOverlay.h
     src/RotateDialog.h
+    src/ImageProcessor.h
+    src/AdjustmentsPanel.h
 )
 
 add_executable(${PROJECT_NAME}

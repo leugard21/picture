@@ -4,8 +4,10 @@
 #include <QMainWindow>
 
 class ImageCanvas;
+class AdjustmentsPanel;
 class QLabel;
 class QAction;
+class QDockWidget;
 
 class MainWindow : public QMainWindow {
   Q_OBJECT
@@ -34,6 +36,11 @@ private slots:
   void onRotateArbitrary();
   void onFlipHorizontal();
   void onFlipVertical();
+  void onToggleAdjustments();
+  void onAdjustmentsChanged(int brightness, int contrast, int saturation,
+                            int hue);
+  void onApplyAdjustments();
+  void onResetAdjustments();
   void onZoomIn();
   void onZoomOut();
   void onFitToWindow();
@@ -42,10 +49,12 @@ private slots:
   void onImageModified();
   void onZoomChanged(qreal level);
   void onCropModeChanged(bool cropping);
+  void onAdjustmentModeChanged(bool adjusting);
 
 private:
   void setupMenuBar();
   void setupStatusBar();
+  void setupDockWidgets();
   void updateWindowTitle();
   void updateStatusBar();
   void updateViewActions();
@@ -53,6 +62,8 @@ private:
   bool maybeSave();
 
   ImageCanvas *m_canvas;
+  AdjustmentsPanel *m_adjustmentsPanel;
+  QDockWidget *m_adjustmentsDock;
   QLabel *m_statusLabel;
   QLabel *m_zoomLabel;
   QString m_currentFilePath;
@@ -70,6 +81,7 @@ private:
   QAction *m_rotateArbitraryAction;
   QAction *m_flipHorizontalAction;
   QAction *m_flipVerticalAction;
+  QAction *m_adjustmentsAction;
 };
 
 #endif
