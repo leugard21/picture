@@ -20,11 +20,13 @@ set(SOURCES
     src/main.cpp
     src/MainWindow.cpp
     src/ImageCanvas.cpp
+    src/ResizeDialog.cpp
 )
 
 set(HEADERS
     src/MainWindow.h
     src/ImageCanvas.h
+    src/ResizeDialog.h
 )
 
 add_executable(${PROJECT_NAME}

@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "ImageCanvas.h"
+#include "ResizeDialog.h"
 
 #include <QCloseEvent>
 #include <QFileDialog>
@@ -10,8 +11,10 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_canvas(new ImageCanvas(this)),
-      m_statusLabel(new QLabel(this)), m_currentFilePath(),
-      m_isModified(false) {
+      m_statusLabel(new QLabel(this)), m_zoomLabel(new QLabel(this)),
+      m_currentFilePath(), m_isModified(false), m_zoomInAction(nullptr),
+      m_zoomOutAction(nullptr), m_fitToWindowAction(nullptr),
+      m_actualSizeAction(nullptr), m_resizeAction(nullptr) {
   setCentralWidget(m_canvas);
   setMinimumSize(800, 600);
   resize(1200, 800);
@@ -24,6 +27,8 @@ MainWindow::MainWindow(QWidget *parent)
           &MainWindow::onImageLoaded);
   connect(m_canvas, &ImageCanvas::imageModified, this,
           &MainWindow::onImageModified);
+  connect(m_canvas, &ImageCanvas::zoomChanged, this,
+          &MainWindow::onZoomChanged);
 }
 
 void MainWindow::setupMenuBar() {
@@ -67,29 +72,49 @@ void MainWindow::setupMenuBar() {
   redoAction->setShortcut(QKeySequence::Redo);
   redoAction->setEnabled(false);
 
+  QMenu *imageMenu = menuBar()->addMenu(tr("&Image"));
+
+  m_resizeAction = imageMenu->addAction(tr("&Resize..."));
+  m_resizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_R));
+  m_resizeAction->setEnabled(false);
+  connect(m_resizeAction, &QAction::triggered, this,
+          &MainWindow::onResizeImage);
+
   QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
 
-  QAction *zoomInAction = viewMenu->addAction(tr("Zoom &In"));
-  zoomInAction->setShortcut(QKeySequence::ZoomIn);
-  zoomInAction->setEnabled(false);
+  m_zoomInAction = viewMenu->addAction(tr("Zoom &In"));
+  m_zoomInAction->setShortcut(QKeySequence::ZoomIn);
+  m_zoomInAction->setEnabled(false);
+  connect(m_zoomInAction, &QAction::triggered, this, &MainWindow::onZoomIn);
 
-  QAction *zoomOutAction = viewMenu->addAction(tr("Zoom &Out"));
-  zoomOutAction->setShortcut(QKeySequence::ZoomOut);
-  zoomOutAction->setEnabled(false);
+  m_zoomOutAction = viewMenu->addAction(tr("Zoom &Out"));
+  m_zoomOutAction->setShortcut(QKeySequence::ZoomOut);
+  m_zoomOutAction->setEnabled(false);
+  connect(m_zoomOutAction, &QAction::triggered, this, &MainWindow::onZoomOut);
 
   viewMenu->addSeparator();
 
-  QAction *fitAction = viewMenu->addAction(tr("&Fit to Window"));
-  fitAction->setEnabled(false);
+  m_fitToWindowAction = viewMenu->addAction(tr("&Fit to Window"));
+  m_fitToWindowAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_0));
+  m_fitToWindowAction->setEnabled(false);
+  connect(m_fitToWindowAction, &QAction::triggered, this,
+          &MainWindow::onFitToWindow);
 
-  QAction *actualSizeAction = viewMenu->addAction(tr("&Actual Size"));
-  actualSizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_1));
-  actualSizeAction->setEnabled(false);
+  m_actualSizeAction = viewMenu->addAction(tr("&Actual Size"));
+  m_actualSizeAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_1));
+  m_actualSizeAction->setEnabled(false);
+  connect(m_actualSizeAction, &QAction::triggered, this,
+          &MainWindow::onActualSize);
 }
 
 void MainWindow::setupStatusBar() {
   m_statusLabel->setText(tr("Ready"));
-  statusBar()->addWidget(m_statusLabel);
+  statusBar()->addWidget(m_statusLabel, 1);
+
+  m_zoomLabel->setText(tr("100%"));
+  m_zoomLabel->setMinimumWidth(60);
+  m_zoomLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  statusBar()->addPermanentWidget(m_zoomLabel);
 }
 
 void MainWindow::updateWindowTitle() {
@@ -115,6 +140,15 @@ void MainWindow::updateStatusBar() {
   } else {
     m_statusLabel->setText(tr("Ready"));
   }
+}
+
+void MainWindow::updateViewActions() {
+  bool hasImage = m_canvas->hasImage();
+  m_zoomInAction->setEnabled(hasImage);
+  m_zoomOutAction->setEnabled(hasImage);
+  m_fitToWindowAction->setEnabled(hasImage);
+  m_actualSizeAction->setEnabled(hasImage);
+  m_resizeAction->setEnabled(hasImage);
 }
 
 bool MainWindow::maybeSave() {
@@ -155,6 +189,7 @@ void MainWindow::onNewFile() {
   m_isModified = false;
   updateWindowTitle();
   updateStatusBar();
+  updateViewActions();
 }
 
 void MainWindow::onOpenFile() {
@@ -176,6 +211,7 @@ void MainWindow::onOpenFile() {
     m_isModified = false;
     updateWindowTitle();
     updateStatusBar();
+    updateViewActions();
   } else {
     QMessageBox::critical(this, tr("Error"),
                           tr("Failed to open image:\n%1").arg(filePath));
@@ -231,14 +267,41 @@ void MainWindow::onCloseFile() {
   m_isModified = false;
   updateWindowTitle();
   updateStatusBar();
+  updateViewActions();
 }
+
+void MainWindow::onResizeImage() {
+  if (!m_canvas->hasImage()) {
+    return;
+  }
+
+  ResizeDialog dialog(m_canvas->imageSize(), this);
+  if (dialog.exec() == QDialog::Accepted) {
+    m_canvas->resizeImage(dialog.newSize(), dialog.transformationMode());
+    updateStatusBar();
+  }
+}
+
+void MainWindow::onZoomIn() { m_canvas->zoomIn(); }
+
+void MainWindow::onZoomOut() { m_canvas->zoomOut(); }
+
+void MainWindow::onFitToWindow() { m_canvas->fitToWindow(); }
+
+void MainWindow::onActualSize() { m_canvas->actualSize(); }
 
 void MainWindow::onImageLoaded(const QString &path) {
   Q_UNUSED(path);
   updateStatusBar();
+  updateViewActions();
 }
 
 void MainWindow::onImageModified() {
   m_isModified = true;
   updateWindowTitle();
+}
+
+void MainWindow::onZoomChanged(qreal level) {
+  int percentage = static_cast<int>(level * 100);
+  m_zoomLabel->setText(tr("%1%").arg(percentage));
 }
