@@ -1,4 +1,5 @@
 #include "ImageCanvas.h"
+#include "CropOverlay.h"
 
 #include <QFileInfo>
 #include <QImageReader>
@@ -10,7 +11,8 @@
 
 ImageCanvas::ImageCanvas(QWidget *parent)
     : QWidget(parent), m_image(), m_displayPixmap(), m_zoomLevel(1.0),
-      m_panOffset(0, 0), m_lastMousePos(), m_isPanning(false) {
+      m_panOffset(0, 0), m_lastMousePos(), m_isPanning(false),
+      m_cropOverlay(nullptr) {
   setMinimumSize(200, 200);
   setAutoFillBackground(true);
   setMouseTracking(true);
@@ -70,6 +72,7 @@ bool ImageCanvas::saveImage(const QString &path) {
 }
 
 void ImageCanvas::clearImage() {
+  cancelCrop();
   m_image = QImage();
   m_displayPixmap = QPixmap();
   m_zoomLevel = 1.0;
@@ -93,6 +96,7 @@ void ImageCanvas::setZoomLevel(qreal level) {
   m_zoomLevel = level;
   updateDisplayPixmap();
   constrainPan();
+  updateCropOverlay();
   update();
   emit zoomChanged(m_zoomLevel);
 }
@@ -143,6 +147,154 @@ void ImageCanvas::resizeImage(const QSize &newSize,
   emit zoomChanged(m_zoomLevel);
 }
 
+void ImageCanvas::startCrop() {
+  if (m_image.isNull() || m_cropOverlay) {
+    return;
+  }
+
+  m_cropOverlay = new CropOverlay(this);
+  m_cropOverlay->setImageRect(currentImageRect());
+  m_cropOverlay->setGeometry(rect());
+  m_cropOverlay->show();
+  m_cropOverlay->raise();
+
+  emit cropModeChanged(true);
+}
+
+void ImageCanvas::applyCrop() {
+  if (!m_cropOverlay || m_image.isNull()) {
+    return;
+  }
+
+  QRect selection = m_cropOverlay->selection();
+  QRect imageRect = currentImageRect();
+
+  int srcX = static_cast<int>((selection.x() - imageRect.x()) / m_zoomLevel);
+  int srcY = static_cast<int>((selection.y() - imageRect.y()) / m_zoomLevel);
+  int srcW = static_cast<int>(selection.width() / m_zoomLevel);
+  int srcH = static_cast<int>(selection.height() / m_zoomLevel);
+
+  srcX = std::clamp(srcX, 0, m_image.width() - 1);
+  srcY = std::clamp(srcY, 0, m_image.height() - 1);
+  srcW = std::clamp(srcW, 1, m_image.width() - srcX);
+  srcH = std::clamp(srcH, 1, m_image.height() - srcY);
+
+  m_image = m_image.copy(srcX, srcY, srcW, srcH);
+  m_panOffset = QPoint(0, 0);
+
+  delete m_cropOverlay;
+  m_cropOverlay = nullptr;
+
+  updateDisplayPixmap();
+  update();
+
+  emit imageModified();
+  emit cropModeChanged(false);
+}
+
+void ImageCanvas::cancelCrop() {
+  if (m_cropOverlay) {
+    delete m_cropOverlay;
+    m_cropOverlay = nullptr;
+    emit cropModeChanged(false);
+  }
+}
+
+bool ImageCanvas::isCropping() const { return m_cropOverlay != nullptr; }
+
+void ImageCanvas::rotate90CW() {
+  if (m_image.isNull()) {
+    return;
+  }
+
+  QTransform transform;
+  transform.rotate(90);
+  m_image = m_image.transformed(transform, Qt::SmoothTransformation);
+  m_panOffset = QPoint(0, 0);
+
+  updateDisplayPixmap();
+  update();
+  emit imageModified();
+}
+
+void ImageCanvas::rotate90CCW() {
+  if (m_image.isNull()) {
+    return;
+  }
+
+  QTransform transform;
+  transform.rotate(-90);
+  m_image = m_image.transformed(transform, Qt::SmoothTransformation);
+  m_panOffset = QPoint(0, 0);
+
+  updateDisplayPixmap();
+  update();
+  emit imageModified();
+}
+
+void ImageCanvas::rotate180() {
+  if (m_image.isNull()) {
+    return;
+  }
+
+  QTransform transform;
+  transform.rotate(180);
+  m_image = m_image.transformed(transform, Qt::SmoothTransformation);
+
+  updateDisplayPixmap();
+  update();
+  emit imageModified();
+}
+
+void ImageCanvas::rotateByAngle(qreal degrees, const QColor &background) {
+  if (m_image.isNull() || qFuzzyIsNull(degrees)) {
+    return;
+  }
+
+  QTransform transform;
+  transform.rotate(degrees);
+
+  QImage rotated = m_image.transformed(transform, Qt::SmoothTransformation);
+
+  if (background.alpha() > 0) {
+    QImage result(rotated.size(), QImage::Format_ARGB32_Premultiplied);
+    result.fill(background);
+    QPainter painter(&result);
+    painter.drawImage(0, 0, rotated);
+    painter.end();
+    m_image = result;
+  } else {
+    m_image = rotated;
+  }
+
+  m_panOffset = QPoint(0, 0);
+  updateDisplayPixmap();
+  update();
+  emit imageModified();
+}
+
+void ImageCanvas::flipHorizontal() {
+  if (m_image.isNull()) {
+    return;
+  }
+
+  m_image = m_image.flipped(Qt::Horizontal);
+  updateDisplayPixmap();
+  update();
+  emit imageModified();
+}
+
+void ImageCanvas::flipVertical() {
+  if (m_image.isNull()) {
+    return;
+  }
+
+  m_image = m_image.flipped(Qt::Vertical);
+  updateDisplayPixmap();
+  update();
+  emit imageModified();
+}
+
 void ImageCanvas::paintEvent(QPaintEvent *event) {
   Q_UNUSED(event);
 
@@ -154,10 +306,7 @@ void ImageCanvas::paintEvent(QPaintEvent *event) {
     return;
   }
 
-  QSize scaledSize = m_image.size() * m_zoomLevel;
-  int x = (width() - scaledSize.width()) / 2 + m_panOffset.x();
-  int y = (height() - scaledSize.height()) / 2 + m_panOffset.y();
-  QRect imageRect(x, y, scaledSize.width(), scaledSize.height());
+  QRect imageRect = currentImageRect();
 
   painter.fillRect(rect(), palette().color(QPalette::Window));
   drawCheckerboard(painter, imageRect);
@@ -170,10 +319,11 @@ void ImageCanvas::paintEvent(QPaintEvent *event) {
 void ImageCanvas::resizeEvent(QResizeEvent *event) {
   Q_UNUSED(event);
   updateDisplayPixmap();
+  updateCropOverlay();
 }
 
 void ImageCanvas::wheelEvent(QWheelEvent *event) {
-  if (m_image.isNull()) {
+  if (m_image.isNull() || m_cropOverlay) {
     event->ignore();
     return;
   }
@@ -190,7 +340,7 @@ void ImageCanvas::wheelEvent(QWheelEvent *event) {
 }
 
 void ImageCanvas::mousePressEvent(QMouseEvent *event) {
-  if (m_image.isNull()) {
+  if (m_image.isNull() || m_cropOverlay) {
     event->ignore();
     return;
   }
@@ -302,4 +452,22 @@ void ImageCanvas::constrainPan() {
 
   m_panOffset.setX(std::clamp(m_panOffset.x(), -maxPanX, maxPanX));
   m_panOffset.setY(std::clamp(m_panOffset.y(), -maxPanY, maxPanY));
+}
+
+QRect ImageCanvas::currentImageRect() const {
+  if (m_image.isNull()) {
+    return QRect();
+  }
+
+  QSize scaledSize = m_image.size() * m_zoomLevel;
+  int x = (width() - scaledSize.width()) / 2 + m_panOffset.x();
+  int y = (height() - scaledSize.height()) / 2 + m_panOffset.y();
+  return QRect(x, y, scaledSize.width(), scaledSize.height());
+}
+
+void ImageCanvas::updateCropOverlay() {
+  if (m_cropOverlay) {
+    m_cropOverlay->setGeometry(rect());
+    m_cropOverlay->setImageRect(currentImageRect());
+  }
 }

@@ -1,9 +1,11 @@
 #include "MainWindow.h"
 #include "ImageCanvas.h"
 #include "ResizeDialog.h"
+#include "RotateDialog.h"
 
 #include <QCloseEvent>
 #include <QFileDialog>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -14,7 +16,11 @@ MainWindow::MainWindow(QWidget *parent)
       m_statusLabel(new QLabel(this)), m_zoomLabel(new QLabel(this)),
       m_currentFilePath(), m_isModified(false), m_zoomInAction(nullptr),
       m_zoomOutAction(nullptr), m_fitToWindowAction(nullptr),
-      m_actualSizeAction(nullptr), m_resizeAction(nullptr) {
+      m_actualSizeAction(nullptr), m_resizeAction(nullptr),
+      m_cropAction(nullptr), m_rotate90CWAction(nullptr),
+      m_rotate90CCWAction(nullptr), m_rotate180Action(nullptr),
+      m_rotateArbitraryAction(nullptr), m_flipHorizontalAction(nullptr),
+      m_flipVerticalAction(nullptr) {
   setCentralWidget(m_canvas);
   setMinimumSize(800, 600);
   resize(1200, 800);
@@ -29,6 +35,8 @@ MainWindow::MainWindow(QWidget *parent)
           &MainWindow::onImageModified);
   connect(m_canvas, &ImageCanvas::zoomChanged, this,
           &MainWindow::onZoomChanged);
+  connect(m_canvas, &ImageCanvas::cropModeChanged, this,
+          &MainWindow::onCropModeChanged);
 }
 
 void MainWindow::setupMenuBar() {
@@ -79,6 +87,55 @@ void MainWindow::setupMenuBar() {
   m_resizeAction->setEnabled(false);
   connect(m_resizeAction, &QAction::triggered, this,
           &MainWindow::onResizeImage);
+
+  m_cropAction = imageMenu->addAction(tr("&Crop"));
+  m_cropAction->setShortcut(QKeySequence(Qt::Key_C));
+  m_cropAction->setEnabled(false);
+  connect(m_cropAction, &QAction::triggered, this, &MainWindow::onCrop);
+
+  imageMenu->addSeparator();
+
+  QMenu *rotateMenu = imageMenu->addMenu(tr("&Rotate"));
+
+  m_rotate90CWAction = rotateMenu->addAction(tr("90° &Clockwise"));
+  m_rotate90CWAction->setShortcut(
+      QKeySequence(Qt::CTRL | Qt::Key_BracketRight));
+  m_rotate90CWAction->setEnabled(false);
+  connect(m_rotate90CWAction, &QAction::triggered, this,
+          &MainWindow::onRotate90CW);
+
+  m_rotate90CCWAction = rotateMenu->addAction(tr("90° Counter-Clock&wise"));
+  m_rotate90CCWAction->setShortcut(
+      QKeySequence(Qt::CTRL | Qt::Key_BracketLeft));
+  m_rotate90CCWAction->setEnabled(false);
+  connect(m_rotate90CCWAction, &QAction::triggered, this,
+          &MainWindow::onRotate90CCW);
+
+  m_rotate180Action = rotateMenu->addAction(tr("&180°"));
+  m_rotate180Action->setEnabled(false);
+  connect(m_rotate180Action, &QAction::triggered, this,
+          &MainWindow::onRotate180);
+
+  rotateMenu->addSeparator();
+
+  m_rotateArbitraryAction = rotateMenu->addAction(tr("&Arbitrary Angle..."));
+  m_rotateArbitraryAction->setEnabled(false);
+  connect(m_rotateArbitraryAction, &QAction::triggered, this,
+          &MainWindow::onRotateArbitrary);
+
+  QMenu *flipMenu = imageMenu->addMenu(tr("&Flip"));
+
+  m_flipHorizontalAction = flipMenu->addAction(tr("&Horizontal"));
+  m_flipHorizontalAction->setShortcut(QKeySequence(Qt::Key_H));
+  m_flipHorizontalAction->setEnabled(false);
+  connect(m_flipHorizontalAction, &QAction::triggered, this,
+          &MainWindow::onFlipHorizontal);
+
+  m_flipVerticalAction = flipMenu->addAction(tr("&Vertical"));
+  m_flipVerticalAction->setShortcut(QKeySequence(Qt::Key_V));
+  m_flipVerticalAction->setEnabled(false);
+  connect(m_flipVerticalAction, &QAction::triggered, this,
+          &MainWindow::onFlipVertical);
 
   QMenu *viewMenu = menuBar()->addMenu(tr("&View"));
 
@@ -144,11 +201,32 @@ void MainWindow::updateStatusBar() {
 
 void MainWindow::updateViewActions() {
   bool hasImage = m_canvas->hasImage();
-  m_zoomInAction->setEnabled(hasImage);
-  m_zoomOutAction->setEnabled(hasImage);
-  m_fitToWindowAction->setEnabled(hasImage);
-  m_actualSizeAction->setEnabled(hasImage);
-  m_resizeAction->setEnabled(hasImage);
+  bool notCropping = !m_canvas->isCropping();
+
+  m_zoomInAction->setEnabled(hasImage && notCropping);
+  m_zoomOutAction->setEnabled(hasImage && notCropping);
+  m_fitToWindowAction->setEnabled(hasImage && notCropping);
+  m_actualSizeAction->setEnabled(hasImage && notCropping);
+}
+
+void MainWindow::updateImageActions() {
+  bool hasImage = m_canvas->hasImage();
+  bool notCropping = !m_canvas->isCropping();
+
+  m_resizeAction->setEnabled(hasImage && notCropping);
+  m_cropAction->setEnabled(hasImage);
+  m_rotate90CWAction->setEnabled(hasImage && notCropping);
+  m_rotate90CCWAction->setEnabled(hasImage && notCropping);
+  m_rotate180Action->setEnabled(hasImage && notCropping);
+  m_rotateArbitraryAction->setEnabled(hasImage && notCropping);
+  m_flipHorizontalAction->setEnabled(hasImage && notCropping);
+  m_flipVerticalAction->setEnabled(hasImage && notCropping);
+
+  if (m_canvas->isCropping()) {
+    m_cropAction->setText(tr("&Apply Crop"));
+  } else {
+    m_cropAction->setText(tr("&Crop"));
+  }
 }
 
 bool MainWindow::maybeSave() {
@@ -179,6 +257,21 @@ void MainWindow::closeEvent(QCloseEvent *event) {
   }
 }
 
+void MainWindow::keyPressEvent(QKeyEvent *event) {
+  if (m_canvas->isCropping()) {
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+      onApplyCrop();
+      event->accept();
+      return;
+    } else if (event->key() == Qt::Key_Escape) {
+      onCancelCrop();
+      event->accept();
+      return;
+    }
+  }
+  QMainWindow::keyPressEvent(event);
+}
+
 void MainWindow::onNewFile() {
   if (!maybeSave()) {
     return;
@@ -190,6 +283,7 @@ void MainWindow::onNewFile() {
   updateWindowTitle();
   updateStatusBar();
   updateViewActions();
+  updateImageActions();
 }
 
 void MainWindow::onOpenFile() {
@@ -212,6 +306,7 @@ void MainWindow::onOpenFile() {
     updateWindowTitle();
     updateStatusBar();
     updateViewActions();
+    updateImageActions();
   } else {
     QMessageBox::critical(this, tr("Error"),
                           tr("Failed to open image:\n%1").arg(filePath));
@@ -268,6 +363,7 @@ void MainWindow::onCloseFile() {
   updateWindowTitle();
   updateStatusBar();
   updateViewActions();
+  updateImageActions();
 }
 
 void MainWindow::onResizeImage() {
@@ -282,6 +378,49 @@ void MainWindow::onResizeImage() {
   }
 }
 
+void MainWindow::onCrop() {
+  if (m_canvas->isCropping()) {
+    onApplyCrop();
+  } else {
+    m_canvas->startCrop();
+  }
+}
+
+void MainWindow::onApplyCrop() {
+  m_canvas->applyCrop();
+  updateStatusBar();
+}
+
+void MainWindow::onCancelCrop() { m_canvas->cancelCrop(); }
+
+void MainWindow::onRotate90CW() {
+  m_canvas->rotate90CW();
+  updateStatusBar();
+}
+
+void MainWindow::onRotate90CCW() {
+  m_canvas->rotate90CCW();
+  updateStatusBar();
+}
+
+void MainWindow::onRotate180() { m_canvas->rotate180(); }
+
+void MainWindow::onRotateArbitrary() {
+  if (!m_canvas->hasImage()) {
+    return;
+  }
+
+  RotateDialog dialog(this);
+  if (dialog.exec() == QDialog::Accepted) {
+    m_canvas->rotateByAngle(dialog.angle(), dialog.backgroundColor());
+    updateStatusBar();
+  }
+}
+
+void MainWindow::onFlipHorizontal() { m_canvas->flipHorizontal(); }
+
+void MainWindow::onFlipVertical() { m_canvas->flipVertical(); }
+
 void MainWindow::onZoomIn() { m_canvas->zoomIn(); }
 
 void MainWindow::onZoomOut() { m_canvas->zoomOut(); }
@@ -294,14 +433,22 @@ void MainWindow::onImageLoaded(const QString &path) {
   Q_UNUSED(path);
   updateStatusBar();
   updateViewActions();
+  updateImageActions();
 }
 
 void MainWindow::onImageModified() {
   m_isModified = true;
   updateWindowTitle();
+  updateStatusBar();
 }
 
 void MainWindow::onZoomChanged(qreal level) {
   int percentage = static_cast<int>(level * 100);
   m_zoomLabel->setText(tr("%1%").arg(percentage));
+}
+
+void MainWindow::onCropModeChanged(bool cropping) {
+  Q_UNUSED(cropping);
+  updateViewActions();
+  updateImageActions();
 }

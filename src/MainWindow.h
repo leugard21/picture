@@ -16,6 +16,7 @@ public:
 
 protected:
   void closeEvent(QCloseEvent *event) override;
+  void keyPressEvent(QKeyEvent *event) override;
 
 private slots:
   void onNewFile();
@@ -24,6 +25,15 @@ private slots:
   void onSaveFileAs();
   void onCloseFile();
   void onResizeImage();
+  void onCrop();
+  void onApplyCrop();
+  void onCancelCrop();
+  void onRotate90CW();
+  void onRotate90CCW();
+  void onRotate180();
+  void onRotateArbitrary();
+  void onFlipHorizontal();
+  void onFlipVertical();
   void onZoomIn();
   void onZoomOut();
   void onFitToWindow();
@@ -31,6 +41,7 @@ private slots:
   void onImageLoaded(const QString &path);
   void onImageModified();
   void onZoomChanged(qreal level);
+  void onCropModeChanged(bool cropping);
 
 private:
   void setupMenuBar();
@@ -38,6 +49,7 @@ private:
   void updateWindowTitle();
   void updateStatusBar();
   void updateViewActions();
+  void updateImageActions();
   bool maybeSave();
 
   ImageCanvas *m_canvas;
@@ -51,6 +63,13 @@ private:
   QAction *m_fitToWindowAction;
   QAction *m_actualSizeAction;
   QAction *m_resizeAction;
+  QAction *m_cropAction;
+  QAction *m_rotate90CWAction;
+  QAction *m_rotate90CCWAction;
+  QAction *m_rotate180Action;
+  QAction *m_rotateArbitraryAction;
+  QAction *m_flipHorizontalAction;
+  QAction *m_flipVerticalAction;
 };
 
 #endif

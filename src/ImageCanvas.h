@@ -5,6 +5,8 @@
 #include <QPixmap>
 #include <QWidget>
 
+class CropOverlay;
+
 class ImageCanvas : public QWidget {
   Q_OBJECT
 
@@ -34,11 +36,25 @@ public:
 
   void resizeImage(const QSize &newSize, Qt::TransformationMode mode);
 
+  void startCrop();
+  void applyCrop();
+  void cancelCrop();
+  [[nodiscard]] bool isCropping() const;
+
+  void rotate90CW();
+  void rotate90CCW();
+  void rotate180();
+  void rotateByAngle(qreal degrees, const QColor &background);
+
+  void flipHorizontal();
+  void flipVertical();
+
 signals:
   void imageLoaded(const QString &path);
   void imageSaved(const QString &path);
   void imageModified();
   void zoomChanged(qreal level);
+  void cropModeChanged(bool cropping);
 
 protected:
   void paintEvent(QPaintEvent *event) override;
@@ -53,6 +69,8 @@ private:
   void drawCheckerboard(QPainter &painter, const QRect &rect);
   void zoomAtPoint(qreal factor, const QPoint &point);
   void constrainPan();
+  QRect currentImageRect() const;
+  void updateCropOverlay();
 
   QImage m_image;
   QPixmap m_displayPixmap;
@@ -60,6 +78,7 @@ private:
   QPoint m_panOffset;
   QPoint m_lastMousePos;
   bool m_isPanning;
+  CropOverlay *m_cropOverlay;
 };
 
 #endif
