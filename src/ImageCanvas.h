@@ -4,8 +4,11 @@
 #include <QImage>
 #include <QPixmap>
 #include <QWidget>
+#include <memory>
+#include <vector>
 
 class CropOverlay;
+class Layer;
 
 class ImageCanvas : public QWidget {
   Q_OBJECT
@@ -20,11 +23,25 @@ public:
   explicit ImageCanvas(QWidget *parent = nullptr);
   ~ImageCanvas() override = default;
 
-  bool loadImage(const QString &path);
-  bool saveImage(const QString &path);
-  void clearImage();
+  bool loadProject(const QString &path);
+  bool saveProject(const QString &path);
+  void clearProject();
 
-  [[nodiscard]] QImage getImage() const;
+  void addLayer(const QImage &image, const QString &name);
+  void removeLayer(int index);
+  void moveLayerUp(int index);
+  void moveLayerDown(int index);
+  void duplicateLayer(int index);
+  void setActiveLayer(int index);
+  int activeLayerIndex() const;
+  void setLayerVisibility(int index, bool visible);
+  void setLayerOpacity(int index, qreal opacity);
+  void setLayerBlendMode(int index, int mode);
+
+  std::shared_ptr<Layer> activeLayer();
+  const std::vector<std::shared_ptr<Layer>> &layers() const;
+
+  [[nodiscard]] QImage getFlattenedImage() const;
   [[nodiscard]] bool hasImage() const;
   [[nodiscard]] QSize imageSize() const;
 
@@ -68,6 +85,11 @@ signals:
   void cropModeChanged(bool cropping);
   void adjustmentModeChanged(bool adjusting);
 
+  void layerAdded(const QString &name, bool visible);
+  void layerRemoved(int index);
+  void layerMoved(int from, int to);
+  void activeLayerChanged(int index);
+
 protected:
   void paintEvent(QPaintEvent *event) override;
   void resizeEvent(QResizeEvent *event) override;
@@ -84,8 +106,10 @@ private:
   QRect currentImageRect() const;
   void updateCropOverlay();
 
-  QImage m_image;
-  QImage m_originalImage;
+  std::vector<std::shared_ptr<Layer>> m_layers;
+  int m_activeLayerIndex;
+
+  QImage m_originalLayerImage;
   QPixmap m_displayPixmap;
   qreal m_zoomLevel;
   QPoint m_panOffset;

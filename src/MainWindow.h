@@ -5,6 +5,7 @@
 
 class ImageCanvas;
 class AdjustmentsPanel;
+class LayersPanel;
 class QLabel;
 class QAction;
 class QDockWidget;
@@ -56,6 +57,12 @@ private slots:
   void onCropModeChanged(bool cropping);
   void onAdjustmentModeChanged(bool adjusting);
 
+  void onToggleLayers();
+  void onLayerAdded(const QString &name, bool visible);
+  void onLayerRemoved(int index);
+  void onLayerMoved(int from, int to);
+  void onActiveLayerChanged(int index);
+
 private:
   void setupMenuBar();
   void setupStatusBar();
@@ -68,7 +75,10 @@ private:
 
   ImageCanvas *m_canvas;
   AdjustmentsPanel *m_adjustmentsPanel;
+  LayersPanel *m_layersPanel;
   QDockWidget *m_adjustmentsDock;
+  QDockWidget *m_layersDock;
+
   QLabel *m_statusLabel;
   QLabel *m_zoomLabel;
   QString m_currentFilePath;
@@ -87,6 +97,7 @@ private:
   QAction *m_flipHorizontalAction;
   QAction *m_flipVerticalAction;
   QAction *m_adjustmentsAction;
+  QAction *m_layersAction;
   QAction *m_filterGrayscaleAction;
   QAction *m_filterSepiaAction;
   QAction *m_filterInvertAction;

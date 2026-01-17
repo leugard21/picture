@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "AdjustmentsPanel.h"
 #include "ImageCanvas.h"
+#include "LayersPanel.h"
 #include "ResizeDialog.h"
 #include "RotateDialog.h"
 
@@ -15,7 +16,8 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_canvas(new ImageCanvas(this)),
-      m_adjustmentsPanel(nullptr), m_adjustmentsDock(nullptr),
+      m_adjustmentsPanel(nullptr), m_layersPanel(nullptr),
+      m_adjustmentsDock(nullptr), m_layersDock(nullptr),
       m_statusLabel(new QLabel(this)), m_zoomLabel(new QLabel(this)),
       m_currentFilePath(), m_isModified(false), m_zoomInAction(nullptr),
       m_zoomOutAction(nullptr), m_fitToWindowAction(nullptr),
@@ -24,9 +26,9 @@ MainWindow::MainWindow(QWidget *parent)
       m_rotate90CCWAction(nullptr), m_rotate180Action(nullptr),
       m_rotateArbitraryAction(nullptr), m_flipHorizontalAction(nullptr),
       m_flipVerticalAction(nullptr), m_adjustmentsAction(nullptr),
-      m_filterGrayscaleAction(nullptr), m_filterSepiaAction(nullptr),
-      m_filterInvertAction(nullptr), m_filterBlurAction(nullptr),
-      m_filterSharpenAction(nullptr) {
+      m_layersAction(nullptr), m_filterGrayscaleAction(nullptr),
+      m_filterSepiaAction(nullptr), m_filterInvertAction(nullptr),
+      m_filterBlurAction(nullptr), m_filterSharpenAction(nullptr) {
   setCentralWidget(m_canvas);
   setMinimumSize(800, 600);
   resize(1200, 800);
@@ -46,6 +48,13 @@ MainWindow::MainWindow(QWidget *parent)
           &MainWindow::onCropModeChanged);
   connect(m_canvas, &ImageCanvas::adjustmentModeChanged, this,
           &MainWindow::onAdjustmentModeChanged);
+
+  connect(m_canvas, &ImageCanvas::activeLayerChanged, this,
+          &MainWindow::onActiveLayerChanged);
+  connect(m_canvas, &ImageCanvas::layerAdded, m_layersPanel,
+          &LayersPanel::addLayer);
+  connect(m_canvas, &ImageCanvas::layerRemoved, m_layersPanel,
+          [this](int index) { m_layersPanel->updateLayer(index, "", false); });
 }
 
 void MainWindow::setupMenuBar() {
@@ -110,6 +119,13 @@ void MainWindow::setupMenuBar() {
   m_adjustmentsAction->setCheckable(true);
   connect(m_adjustmentsAction, &QAction::triggered, this,
           &MainWindow::onToggleAdjustments);
+
+  m_layersAction = imageMenu->addAction(tr("&Layers..."));
+  m_layersAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_L));
+  m_layersAction->setEnabled(false);
+  m_layersAction->setCheckable(true);
+  connect(m_layersAction, &QAction::triggered, this,
+          &MainWindow::onToggleLayers);
 
   imageMenu->addSeparator();
 
@@ -225,7 +241,6 @@ void MainWindow::setupStatusBar() {
 
 void MainWindow::setupDockWidgets() {
   m_adjustmentsPanel = new AdjustmentsPanel(this);
-
   m_adjustmentsDock = new QDockWidget(tr("Adjustments"), this);
   m_adjustmentsDock->setWidget(m_adjustmentsPanel);
   m_adjustmentsDock->setAllowedAreas(Qt::LeftDockWidgetArea |
@@ -239,6 +254,7 @@ void MainWindow::setupDockWidgets() {
           &MainWindow::onApplyAdjustments);
   connect(m_adjustmentsPanel, &AdjustmentsPanel::resetRequested, this,
           &MainWindow::onResetAdjustments);
+
   connect(m_adjustmentsDock, &QDockWidget::visibilityChanged,
           [this](bool visible) {
             m_adjustmentsAction->setChecked(visible);
@@ -249,6 +265,40 @@ void MainWindow::setupDockWidgets() {
               m_adjustmentsPanel->reset();
             }
           });
+
+  m_layersPanel = new LayersPanel(this);
+  m_layersDock = new QDockWidget(tr("Layers"), this);
+  m_layersDock->setWidget(m_layersPanel);
+  m_layersDock->setAllowedAreas(Qt::LeftDockWidgetArea |
+                                Qt::RightDockWidgetArea);
+  m_layersDock->setVisible(false);
+  addDockWidget(Qt::RightDockWidgetArea, m_layersDock);
+
+  connect(m_layersPanel, &LayersPanel::activeLayerChanged, m_canvas,
+          &ImageCanvas::setActiveLayer);
+  connect(m_layersPanel, &LayersPanel::layerVisibilityChanged, m_canvas,
+          &ImageCanvas::setLayerVisibility);
+  connect(m_layersPanel, &LayersPanel::layerOpacityChanged, m_canvas,
+          &ImageCanvas::setLayerOpacity);
+  connect(m_layersPanel, &LayersPanel::layerBlendModeChanged, m_canvas,
+          &ImageCanvas::setLayerBlendMode);
+
+  connect(m_layersPanel, &LayersPanel::layerRemoved, m_canvas,
+          &ImageCanvas::removeLayer);
+  connect(m_layersPanel, &LayersPanel::layerMovedUp, m_canvas,
+          &ImageCanvas::moveLayerUp);
+  connect(m_layersPanel, &LayersPanel::layerMovedDown, m_canvas,
+          &ImageCanvas::moveLayerDown);
+
+  connect(m_canvas, &ImageCanvas::layerAdded, m_layersPanel,
+          &LayersPanel::addLayer);
+  connect(m_canvas, &ImageCanvas::layerRemoved, [this](int index) {
+    Q_UNUSED(index);
+    m_layersPanel->clear();
+  });
+
+  connect(m_layersDock, &QDockWidget::visibilityChanged,
+          [this](bool visible) { m_layersAction->setChecked(visible); });
 }
 
 void MainWindow::updateWindowTitle() {
@@ -294,6 +344,8 @@ void MainWindow::updateImageActions() {
   m_resizeAction->setEnabled(hasImage && notCropping && notAdjusting);
   m_cropAction->setEnabled(hasImage && notAdjusting);
   m_adjustmentsAction->setEnabled(hasImage && notCropping);
+  m_layersAction->setEnabled(hasImage);
+
   m_rotate90CWAction->setEnabled(hasImage && notCropping && notAdjusting);
   m_rotate90CCWAction->setEnabled(hasImage && notCropping && notAdjusting);
   m_rotate180Action->setEnabled(hasImage && notCropping && notAdjusting);
@@ -362,10 +414,11 @@ void MainWindow::onNewFile() {
     return;
   }
 
-  m_canvas->clearImage();
+  m_canvas->clearProject();
   m_currentFilePath.clear();
   m_isModified = false;
   m_adjustmentsDock->setVisible(false);
+  m_layersPanel->clear();
   updateWindowTitle();
   updateStatusBar();
   updateViewActions();
@@ -386,10 +439,12 @@ void MainWindow::onOpenFile() {
     return;
   }
 
-  if (m_canvas->loadImage(filePath)) {
+  if (m_canvas->loadProject(filePath)) {
     m_currentFilePath = filePath;
     m_isModified = false;
     m_adjustmentsDock->setVisible(false);
+    m_layersPanel->clear();
+    m_layersPanel->addLayer("Background", true);
     updateWindowTitle();
     updateStatusBar();
     updateViewActions();
@@ -406,7 +461,7 @@ void MainWindow::onSaveFile() {
     return;
   }
 
-  if (m_canvas->saveImage(m_currentFilePath)) {
+  if (m_canvas->saveProject(m_currentFilePath)) {
     m_isModified = false;
     updateWindowTitle();
   } else {
@@ -429,7 +484,7 @@ void MainWindow::onSaveFileAs() {
     return;
   }
 
-  if (m_canvas->saveImage(filePath)) {
+  if (m_canvas->saveProject(filePath)) {
     m_currentFilePath = filePath;
     m_isModified = false;
     updateWindowTitle();
@@ -444,10 +499,11 @@ void MainWindow::onCloseFile() {
     return;
   }
 
-  m_canvas->clearImage();
+  m_canvas->clearProject();
   m_currentFilePath.clear();
   m_isModified = false;
   m_adjustmentsDock->setVisible(false);
+  m_layersPanel->clear();
   updateWindowTitle();
   updateStatusBar();
   updateViewActions();
@@ -512,6 +568,11 @@ void MainWindow::onFlipVertical() { m_canvas->flipVertical(); }
 void MainWindow::onToggleAdjustments() {
   bool visible = !m_adjustmentsDock->isVisible();
   m_adjustmentsDock->setVisible(visible);
+}
+
+void MainWindow::onToggleLayers() {
+  bool visible = !m_layersDock->isVisible();
+  m_layersDock->setVisible(visible);
 }
 
 void MainWindow::onAdjustmentsChanged(int brightness, int contrast,
@@ -585,4 +646,17 @@ void MainWindow::onAdjustmentModeChanged(bool adjusting) {
   Q_UNUSED(adjusting);
   updateViewActions();
   updateImageActions();
+}
+
+void MainWindow::onLayerAdded(const QString &name, bool visible) {
+  Q_UNUSED(name);
+  Q_UNUSED(visible);
+}
+void MainWindow::onLayerRemoved(int index) { Q_UNUSED(index); }
+void MainWindow::onLayerMoved(int from, int to) {
+  Q_UNUSED(from);
+  Q_UNUSED(to);
+}
+void MainWindow::onActiveLayerChanged(int index) {
+  m_layersPanel->selectLayer(index);
 }

@@ -1,6 +1,7 @@
 #include "ImageCanvas.h"
 #include "CropOverlay.h"
 #include "ImageProcessor.h"
+#include "Layer.h"
 
 #include <QFileInfo>
 #include <QImageReader>
@@ -10,9 +11,14 @@
 #include <QWheelEvent>
 #include <algorithm>
 
+const qreal ImageCanvas::MinZoom;
+const qreal ImageCanvas::MaxZoom;
+const qreal ImageCanvas::ZoomStep;
+
 ImageCanvas::ImageCanvas(QWidget *parent)
-    : QWidget(parent), m_image(), m_originalImage(), m_displayPixmap(),
-      m_zoomLevel(1.0), m_panOffset(0, 0), m_lastMousePos(), m_isPanning(false),
+    : QWidget(parent), m_layers(), m_activeLayerIndex(-1),
+      m_originalLayerImage(), m_displayPixmap(), m_zoomLevel(1.0),
+      m_panOffset(0, 0), m_lastMousePos(), m_isPanning(false),
       m_isAdjusting(false), m_cropOverlay(nullptr) {
   setMinimumSize(200, 200);
   setAutoFillBackground(true);
@@ -23,7 +29,7 @@ ImageCanvas::ImageCanvas(QWidget *parent)
   setPalette(pal);
 }
 
-bool ImageCanvas::loadImage(const QString &path) {
+bool ImageCanvas::loadProject(const QString &path) {
   QImageReader reader(path);
   reader.setAutoTransform(true);
 
@@ -32,23 +38,20 @@ bool ImageCanvas::loadImage(const QString &path) {
     return false;
   }
 
-  m_image = image;
-  m_zoomLevel = 1.0;
-  m_panOffset = QPoint(0, 0);
-
-  updateDisplayPixmap();
-  update();
+  clearProject();
+  addLayer(image, "Background");
 
   emit imageLoaded(path);
   emit zoomChanged(m_zoomLevel);
   return true;
 }
 
-bool ImageCanvas::saveImage(const QString &path) {
-  if (m_image.isNull()) {
+bool ImageCanvas::saveProject(const QString &path) {
+  if (!hasImage()) {
     return false;
   }
 
+  QImage flattened = getFlattenedImage();
   QImageWriter writer(path);
 
   QFileInfo info(path);
@@ -64,7 +67,7 @@ bool ImageCanvas::saveImage(const QString &path) {
     writer.setFormat("BMP");
   }
 
-  if (!writer.write(m_image)) {
+  if (!writer.write(flattened)) {
     return false;
   }
 
@@ -72,9 +75,10 @@ bool ImageCanvas::saveImage(const QString &path) {
   return true;
 }
 
-void ImageCanvas::clearImage() {
+void ImageCanvas::clearProject() {
   cancelCrop();
-  m_image = QImage();
+  m_layers.clear();
+  m_activeLayerIndex = -1;
   m_displayPixmap = QPixmap();
   m_zoomLevel = 1.0;
   m_panOffset = QPoint(0, 0);
@@ -82,11 +86,179 @@ void ImageCanvas::clearImage() {
   emit zoomChanged(m_zoomLevel);
 }
 
-QImage ImageCanvas::getImage() const { return m_image; }
+void ImageCanvas::addLayer(const QImage &image, const QString &name) {
+  auto layer = std::make_shared<Layer>(image, name);
+  m_layers.push_back(layer);
 
-bool ImageCanvas::hasImage() const { return !m_image.isNull(); }
+  int newIndex = static_cast<int>(m_layers.size()) - 1;
+  setActiveLayer(newIndex);
 
-QSize ImageCanvas::imageSize() const { return m_image.size(); }
+  updateDisplayPixmap();
+  update();
+
+  emit layerAdded(name, true);
+  emit activeLayerChanged(newIndex);
+  emit imageModified();
+}
+
+void ImageCanvas::removeLayer(int index) {
+  if (index < 0 || index >= static_cast<int>(m_layers.size()))
+    return;
+
+  m_layers.erase(m_layers.begin() + index);
+
+  if (m_layers.empty()) {
+    m_activeLayerIndex = -1;
+  } else if (m_activeLayerIndex >= static_cast<int>(m_layers.size())) {
+    m_activeLayerIndex = static_cast<int>(m_layers.size()) - 1;
+  }
+
+  updateDisplayPixmap();
+  update();
+
+  emit layerRemoved(index);
+  emit activeLayerChanged(m_activeLayerIndex);
+  emit imageModified();
+}
+
+void ImageCanvas::moveLayerUp(int index) {
+  if (index < 0 || index >= static_cast<int>(m_layers.size()) - 1)
+    return;
+
+  std::swap(m_layers[index], m_layers[index + 1]);
+
+  if (m_activeLayerIndex == index) {
+    m_activeLayerIndex++;
+  } else if (m_activeLayerIndex == index + 1) {
+    m_activeLayerIndex--;
+  }
+
+  updateDisplayPixmap();
+  update();
+
+  emit layerMoved(index, index + 1);
+  emit activeLayerChanged(m_activeLayerIndex);
+  emit imageModified();
+}
+
+void ImageCanvas::moveLayerDown(int index) {
+  if (index <= 0 || index >= static_cast<int>(m_layers.size()))
+    return;
+
+  std::swap(m_layers[index], m_layers[index - 1]);
+
+  if (m_activeLayerIndex == index) {
+    m_activeLayerIndex--;
+  } else if (m_activeLayerIndex == index - 1) {
+    m_activeLayerIndex++;
+  }
+
+  updateDisplayPixmap();
+  update();
+
+  emit layerMoved(index, index - 1);
+  emit activeLayerChanged(m_activeLayerIndex);
+  emit imageModified();
+}
+
+void ImageCanvas::duplicateLayer(int index) {
+  if (index < 0 || index >= static_cast<int>(m_layers.size()))
+    return;
+
+  auto source = m_layers[index];
+  auto copy =
+      std::make_shared<Layer>(source->image(), source->name() + " Copy");
+  copy->setOpacity(source->opacity());
+  copy->setVisible(source->isVisible());
+  copy->setBlendMode(source->blendMode());
+
+  m_layers.insert(m_layers.begin() + index + 1, copy);
+
+  updateDisplayPixmap();
+  update();
+
+  emit layerAdded(copy->name(), copy->isVisible());
+  setActiveLayer(index + 1);
+
+  emit activeLayerChanged(m_activeLayerIndex);
+  emit imageModified();
+}
+
+void ImageCanvas::setActiveLayer(int index) {
+  if (index >= 0 && index < static_cast<int>(m_layers.size())) {
+    m_activeLayerIndex = index;
+  } else {
+    m_activeLayerIndex = -1;
+  }
+}
+
+int ImageCanvas::activeLayerIndex() const { return m_activeLayerIndex; }
+
+void ImageCanvas::setLayerVisibility(int index, bool visible) {
+  if (index >= 0 && index < static_cast<int>(m_layers.size())) {
+    m_layers[index]->setVisible(visible);
+    updateDisplayPixmap();
+    update();
+    emit imageModified();
+  }
+}
+
+void ImageCanvas::setLayerOpacity(int index, qreal opacity) {
+  if (index >= 0 && index < static_cast<int>(m_layers.size())) {
+    m_layers[index]->setOpacity(opacity);
+    updateDisplayPixmap();
+    update();
+    emit imageModified();
+  }
+}
+
+void ImageCanvas::setLayerBlendMode(int index, int mode) {
+  if (index >= 0 && index < static_cast<int>(m_layers.size())) {
+    m_layers[index]->setBlendMode(static_cast<QPainter::CompositionMode>(mode));
+    updateDisplayPixmap();
+    update();
+    emit imageModified();
+  }
+}
+
+std::shared_ptr<Layer> ImageCanvas::activeLayer() {
+  if (m_activeLayerIndex >= 0 &&
+      m_activeLayerIndex < static_cast<int>(m_layers.size())) {
+    return m_layers[m_activeLayerIndex];
+  }
+  return nullptr;
+}
+
+const std::vector<std::shared_ptr<Layer>> &ImageCanvas::layers() const {
+  return m_layers;
+}
+
+QImage ImageCanvas::getFlattenedImage() const {
+  if (m_layers.empty())
+    return QImage();
+
+  QSize size = m_layers[0]->image().size();
+
+  QImage result(size, QImage::Format_ARGB32_Premultiplied);
+  result.fill(Qt::transparent);
+
+  QPainter painter(&result);
+  QRect rect(QPoint(0, 0), size);
+
+  for (const auto &layer : m_layers) {
+    layer->render(painter, rect);
+  }
+
+  return result;
+}
+
+bool ImageCanvas::hasImage() const { return !m_layers.empty(); }
+
+QSize ImageCanvas::imageSize() const {
+  if (m_layers.empty())
+    return QSize(0, 0);
+  return m_layers[0]->image().size();
+}
 
 void ImageCanvas::setZoomLevel(qreal level) {
   level = std::clamp(level, MinZoom, MaxZoom);
@@ -109,12 +281,13 @@ void ImageCanvas::zoomIn() { setZoomLevel(m_zoomLevel * ZoomStep); }
 void ImageCanvas::zoomOut() { setZoomLevel(m_zoomLevel / ZoomStep); }
 
 void ImageCanvas::fitToWindow() {
-  if (m_image.isNull()) {
+  if (!hasImage()) {
     return;
   }
 
-  qreal scaleX = static_cast<qreal>(width()) / m_image.width();
-  qreal scaleY = static_cast<qreal>(height()) / m_image.height();
+  QSize size = imageSize();
+  qreal scaleX = static_cast<qreal>(width()) / size.width();
+  qreal scaleY = static_cast<qreal>(height()) / size.height();
   qreal scale = std::min(scaleX, scaleY) * 0.95;
 
   m_panOffset = QPoint(0, 0);
@@ -133,11 +306,15 @@ void ImageCanvas::resetPan() {
 
 void ImageCanvas::resizeImage(const QSize &newSize,
                               Qt::TransformationMode mode) {
-  if (m_image.isNull() || newSize.isEmpty()) {
+  if (!hasImage() || newSize.isEmpty()) {
     return;
   }
 
-  m_image = m_image.scaled(newSize, Qt::IgnoreAspectRatio, mode);
+  for (auto &layer : m_layers) {
+    layer->setImage(
+        layer->image().scaled(newSize, Qt::IgnoreAspectRatio, mode));
+  }
+
   m_zoomLevel = 1.0;
   m_panOffset = QPoint(0, 0);
 
@@ -149,7 +326,7 @@ void ImageCanvas::resizeImage(const QSize &newSize,
 }
 
 void ImageCanvas::startCrop() {
-  if (m_image.isNull() || m_cropOverlay) {
+  if (!hasImage() || m_cropOverlay) {
     return;
   }
 
@@ -163,24 +340,28 @@ void ImageCanvas::startCrop() {
 }
 
 void ImageCanvas::applyCrop() {
-  if (!m_cropOverlay || m_image.isNull()) {
+  if (!m_cropOverlay || !hasImage()) {
     return;
   }
 
   QRect selection = m_cropOverlay->selection();
   QRect imageRect = currentImageRect();
+  QSize size = imageSize();
 
   int srcX = static_cast<int>((selection.x() - imageRect.x()) / m_zoomLevel);
   int srcY = static_cast<int>((selection.y() - imageRect.y()) / m_zoomLevel);
   int srcW = static_cast<int>(selection.width() / m_zoomLevel);
   int srcH = static_cast<int>(selection.height() / m_zoomLevel);
 
-  srcX = std::clamp(srcX, 0, m_image.width() - 1);
-  srcY = std::clamp(srcY, 0, m_image.height() - 1);
-  srcW = std::clamp(srcW, 1, m_image.width() - srcX);
-  srcH = std::clamp(srcH, 1, m_image.height() - srcY);
+  srcX = std::clamp(srcX, 0, size.width() - 1);
+  srcY = std::clamp(srcY, 0, size.height() - 1);
+  srcW = std::clamp(srcW, 1, size.width() - srcX);
+  srcH = std::clamp(srcH, 1, size.height() - srcY);
 
-  m_image = m_image.copy(srcX, srcY, srcW, srcH);
+  for (auto &layer : m_layers) {
+    layer->setImage(layer->image().copy(srcX, srcY, srcW, srcH));
+  }
+
   m_panOffset = QPoint(0, 0);
 
   delete m_cropOverlay;
@@ -204,14 +385,14 @@ void ImageCanvas::cancelCrop() {
 bool ImageCanvas::isCropping() const { return m_cropOverlay != nullptr; }
 
 void ImageCanvas::rotate90CW() {
-  if (m_image.isNull()) {
+  auto layer = activeLayer();
+  if (!layer)
     return;
-  }
 
   QTransform transform;
   transform.rotate(90);
-  m_image = m_image.transformed(transform, Qt::SmoothTransformation);
-  m_panOffset = QPoint(0, 0);
+  layer->setImage(
+      layer->image().transformed(transform, Qt::SmoothTransformation));
 
   updateDisplayPixmap();
   update();
@@ -219,14 +400,14 @@ void ImageCanvas::rotate90CW() {
 }
 
 void ImageCanvas::rotate90CCW() {
-  if (m_image.isNull()) {
+  auto layer = activeLayer();
+  if (!layer)
     return;
-  }
 
   QTransform transform;
   transform.rotate(-90);
-  m_image = m_image.transformed(transform, Qt::SmoothTransformation);
-  m_panOffset = QPoint(0, 0);
+  layer->setImage(
+      layer->image().transformed(transform, Qt::SmoothTransformation));
 
   updateDisplayPixmap();
   update();
@@ -234,13 +415,14 @@ void ImageCanvas::rotate90CCW() {
 }
 
 void ImageCanvas::rotate180() {
-  if (m_image.isNull()) {
+  auto layer = activeLayer();
+  if (!layer)
     return;
-  }
 
   QTransform transform;
   transform.rotate(180);
-  m_image = m_image.transformed(transform, Qt::SmoothTransformation);
+  layer->setImage(
+      layer->image().transformed(transform, Qt::SmoothTransformation));
 
   updateDisplayPixmap();
   update();
@@ -248,14 +430,14 @@ void ImageCanvas::rotate180() {
 }
 
 void ImageCanvas::rotateByAngle(qreal degrees, const QColor &background) {
-  if (m_image.isNull() || qFuzzyIsNull(degrees)) {
+  auto layer = activeLayer();
+  if (!layer || qFuzzyIsNull(degrees))
     return;
-  }
 
   QTransform transform;
   transform.rotate(degrees);
-
-  QImage rotated = m_image.transformed(transform, Qt::SmoothTransformation);
+  QImage rotated =
+      layer->image().transformed(transform, Qt::SmoothTransformation);
 
   if (background.alpha() > 0) {
     QImage result(rotated.size(), QImage::Format_ARGB32_Premultiplied);
@@ -263,57 +445,58 @@ void ImageCanvas::rotateByAngle(qreal degrees, const QColor &background) {
     QPainter painter(&result);
     painter.drawImage(0, 0, rotated);
     painter.end();
-    m_image = result;
+    layer->setImage(result);
   } else {
-    m_image = rotated;
+    layer->setImage(rotated);
   }
 
-  m_panOffset = QPoint(0, 0);
   updateDisplayPixmap();
   update();
   emit imageModified();
 }
 
 void ImageCanvas::flipHorizontal() {
-  if (m_image.isNull()) {
+  auto layer = activeLayer();
+  if (!layer)
     return;
-  }
 
-  m_image = m_image.flipped(Qt::Horizontal);
+  layer->setImage(layer->image().flipped(Qt::Horizontal));
   updateDisplayPixmap();
   update();
   emit imageModified();
 }
 
 void ImageCanvas::flipVertical() {
-  if (m_image.isNull()) {
+  auto layer = activeLayer();
+  if (!layer)
     return;
-  }
 
-  m_image = m_image.flipped(Qt::Vertical);
+  layer->setImage(layer->image().flipped(Qt::Vertical));
   updateDisplayPixmap();
   update();
   emit imageModified();
 }
 
 void ImageCanvas::startAdjustmentMode() {
-  if (m_image.isNull() || m_isAdjusting) {
+  auto layer = activeLayer();
+  if (!layer || m_isAdjusting) {
     return;
   }
 
-  m_originalImage = m_image;
+  m_originalLayerImage = layer->image();
   m_isAdjusting = true;
   emit adjustmentModeChanged(true);
 }
 
 void ImageCanvas::setPreviewAdjustments(int brightness, int contrast,
                                         int saturation, int hue) {
-  if (!m_isAdjusting || m_originalImage.isNull()) {
+  auto layer = activeLayer();
+  if (!m_isAdjusting || m_originalLayerImage.isNull() || !layer) {
     return;
   }
 
-  m_image = ImageProcessor::applyAdjustments(m_originalImage, brightness,
-                                             contrast, saturation, hue);
+  layer->setImage(ImageProcessor::applyAdjustments(
+      m_originalLayerImage, brightness, contrast, saturation, hue));
   updateDisplayPixmap();
   update();
 }
@@ -323,20 +506,22 @@ void ImageCanvas::applyAdjustments() {
     return;
   }
 
-  m_originalImage = QImage();
+  m_originalLayerImage = QImage();
   m_isAdjusting = false;
   emit imageModified();
   emit adjustmentModeChanged(false);
 }
 
 void ImageCanvas::cancelAdjustments() {
-  if (!m_isAdjusting) {
+  auto layer = activeLayer();
+  if (!m_isAdjusting || !layer) {
     return;
   }
 
-  m_image = m_originalImage;
-  m_originalImage = QImage();
+  layer->setImage(m_originalLayerImage);
+  m_originalLayerImage = QImage();
   m_isAdjusting = false;
+
   updateDisplayPixmap();
   update();
   emit adjustmentModeChanged(false);
@@ -345,28 +530,30 @@ void ImageCanvas::cancelAdjustments() {
 bool ImageCanvas::isAdjusting() const { return m_isAdjusting; }
 
 void ImageCanvas::applyFilter(FilterType type) {
-  if (m_image.isNull()) {
+  auto layer = activeLayer();
+  if (!layer)
     return;
-  }
 
+  QImage img = layer->image();
   switch (type) {
   case FilterType::Grayscale:
-    m_image = ImageProcessor::applyGrayscale(m_image);
+    img = ImageProcessor::applyGrayscale(img);
     break;
   case FilterType::Sepia:
-    m_image = ImageProcessor::applySepia(m_image);
+    img = ImageProcessor::applySepia(img);
     break;
   case FilterType::Invert:
-    m_image = ImageProcessor::applyInvert(m_image);
+    img = ImageProcessor::applyInvert(img);
     break;
   case FilterType::Blur:
-    m_image = ImageProcessor::applyBlur(m_image);
+    img = ImageProcessor::applyBlur(img);
     break;
   case FilterType::Sharpen:
-    m_image = ImageProcessor::applySharpen(m_image);
+    img = ImageProcessor::applySharpen(img);
     break;
   }
 
+  layer->setImage(img);
   updateDisplayPixmap();
   update();
   emit imageModified();
@@ -378,7 +565,7 @@ void ImageCanvas::paintEvent(QPaintEvent *event) {
   QPainter painter(this);
   painter.setRenderHint(QPainter::SmoothPixmapTransform);
 
-  if (m_image.isNull()) {
+  if (!hasImage()) {
     painter.fillRect(rect(), palette().color(QPalette::Window));
     return;
   }
@@ -400,7 +587,7 @@ void ImageCanvas::resizeEvent(QResizeEvent *event) {
 }
 
 void ImageCanvas::wheelEvent(QWheelEvent *event) {
-  if (m_image.isNull() || m_cropOverlay) {
+  if (!hasImage() || m_cropOverlay) {
     event->ignore();
     return;
   }
@@ -417,7 +604,7 @@ void ImageCanvas::wheelEvent(QWheelEvent *event) {
 }
 
 void ImageCanvas::mousePressEvent(QMouseEvent *event) {
-  if (m_image.isNull() || m_cropOverlay) {
+  if (!hasImage() || m_cropOverlay) {
     event->ignore();
     return;
   }
@@ -458,13 +645,15 @@ void ImageCanvas::mouseReleaseEvent(QMouseEvent *event) {
 }
 
 void ImageCanvas::updateDisplayPixmap() {
-  if (m_image.isNull()) {
+  if (!hasImage()) {
     m_displayPixmap = QPixmap();
     return;
   }
 
-  QSize targetSize = m_image.size() * m_zoomLevel;
-  m_displayPixmap = QPixmap::fromImage(m_image.scaled(
+  QImage flattened = getFlattenedImage();
+
+  QSize targetSize = flattened.size() * m_zoomLevel;
+  m_displayPixmap = QPixmap::fromImage(flattened.scaled(
       targetSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
@@ -495,7 +684,8 @@ void ImageCanvas::zoomAtPoint(qreal factor, const QPoint &point) {
     return;
   }
 
-  QSize scaledSize = m_image.size() * m_zoomLevel;
+  QSize size = imageSize();
+  QSize scaledSize = size * m_zoomLevel;
   int imgX = (width() - scaledSize.width()) / 2 + m_panOffset.x();
   int imgY = (height() - scaledSize.height()) / 2 + m_panOffset.y();
 
@@ -506,7 +696,7 @@ void ImageCanvas::zoomAtPoint(qreal factor, const QPoint &point) {
   m_zoomLevel = newZoom;
   updateDisplayPixmap();
 
-  QSize newScaledSize = m_image.size() * m_zoomLevel;
+  QSize newScaledSize = size * m_zoomLevel;
   int newImgX = point.x() - relativePos.x() * newScaledSize.width();
   int newImgY = point.y() - relativePos.y() * newScaledSize.height();
 
@@ -519,11 +709,11 @@ void ImageCanvas::zoomAtPoint(qreal factor, const QPoint &point) {
 }
 
 void ImageCanvas::constrainPan() {
-  if (m_image.isNull()) {
+  if (!hasImage()) {
     return;
   }
 
-  QSize scaledSize = m_image.size() * m_zoomLevel;
+  QSize scaledSize = imageSize() * m_zoomLevel;
   int maxPanX = std::max(0, (scaledSize.width() - width()) / 2 + 100);
   int maxPanY = std::max(0, (scaledSize.height() - height()) / 2 + 100);
 
@@ -532,11 +722,11 @@ void ImageCanvas::constrainPan() {
 }
 
 QRect ImageCanvas::currentImageRect() const {
-  if (m_image.isNull()) {
+  if (!hasImage()) {
     return QRect();
   }
 
-  QSize scaledSize = m_image.size() * m_zoomLevel;
+  QSize scaledSize = imageSize() * m_zoomLevel;
   int x = (width() - scaledSize.width()) / 2 + m_panOffset.x();
   int y = (height() - scaledSize.height()) / 2 + m_panOffset.y();
   return QRect(x, y, scaledSize.width(), scaledSize.height());

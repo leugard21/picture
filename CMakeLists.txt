@@ -25,6 +25,8 @@ set(SOURCES
     src/RotateDialog.cpp
     src/ImageProcessor.cpp
     src/AdjustmentsPanel.cpp
+    src/Layer.cpp
+    src/LayersPanel.cpp
 )
 
 set(HEADERS
@@ -35,6 +37,8 @@ set(HEADERS
     src/RotateDialog.h
     src/ImageProcessor.h
     src/AdjustmentsPanel.h
+    src/Layer.h
+    src/LayersPanel.h
 )
 
 add_executable(${PROJECT_NAME}
