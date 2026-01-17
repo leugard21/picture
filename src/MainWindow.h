@@ -41,6 +41,11 @@ private slots:
                             int hue);
   void onApplyAdjustments();
   void onResetAdjustments();
+  void onFilterGrayscale();
+  void onFilterSepia();
+  void onFilterInvert();
+  void onFilterBlur();
+  void onFilterSharpen();
   void onZoomIn();
   void onZoomOut();
   void onFitToWindow();
@@ -82,6 +87,11 @@ private:
   QAction *m_flipHorizontalAction;
   QAction *m_flipVerticalAction;
   QAction *m_adjustmentsAction;
+  QAction *m_filterGrayscaleAction;
+  QAction *m_filterSepiaAction;
+  QAction *m_filterInvertAction;
+  QAction *m_filterBlurAction;
+  QAction *m_filterSharpenAction;
 };
 
 #endif

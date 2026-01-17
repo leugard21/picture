@@ -344,6 +344,34 @@ void ImageCanvas::cancelAdjustments() {
 
 bool ImageCanvas::isAdjusting() const { return m_isAdjusting; }
 
+void ImageCanvas::applyFilter(FilterType type) {
+  if (m_image.isNull()) {
+    return;
+  }
+
+  switch (type) {
+  case FilterType::Grayscale:
+    m_image = ImageProcessor::applyGrayscale(m_image);
+    break;
+  case FilterType::Sepia:
+    m_image = ImageProcessor::applySepia(m_image);
+    break;
+  case FilterType::Invert:
+    m_image = ImageProcessor::applyInvert(m_image);
+    break;
+  case FilterType::Blur:
+    m_image = ImageProcessor::applyBlur(m_image);
+    break;
+  case FilterType::Sharpen:
+    m_image = ImageProcessor::applySharpen(m_image);
+    break;
+  }
+
+  updateDisplayPixmap();
+  update();
+  emit imageModified();
+}
+
 void ImageCanvas::paintEvent(QPaintEvent *event) {
   Q_UNUSED(event);
 

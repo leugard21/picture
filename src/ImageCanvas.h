@@ -15,6 +15,8 @@ public:
   static constexpr qreal MaxZoom = 10.0;
   static constexpr qreal ZoomStep = 1.25;
 
+  enum class FilterType { Grayscale, Sepia, Invert, Blur, Sharpen };
+
   explicit ImageCanvas(QWidget *parent = nullptr);
   ~ImageCanvas() override = default;
 
@@ -55,6 +57,8 @@ public:
   void applyAdjustments();
   void cancelAdjustments();
   [[nodiscard]] bool isAdjusting() const;
+
+  void applyFilter(FilterType type);
 
 signals:
   void imageLoaded(const QString &path);

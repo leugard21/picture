@@ -23,7 +23,10 @@ MainWindow::MainWindow(QWidget *parent)
       m_cropAction(nullptr), m_rotate90CWAction(nullptr),
       m_rotate90CCWAction(nullptr), m_rotate180Action(nullptr),
       m_rotateArbitraryAction(nullptr), m_flipHorizontalAction(nullptr),
-      m_flipVerticalAction(nullptr), m_adjustmentsAction(nullptr) {
+      m_flipVerticalAction(nullptr), m_adjustmentsAction(nullptr),
+      m_filterGrayscaleAction(nullptr), m_filterSepiaAction(nullptr),
+      m_filterInvertAction(nullptr), m_filterBlurAction(nullptr),
+      m_filterSharpenAction(nullptr) {
   setCentralWidget(m_canvas);
   setMinimumSize(800, 600);
   resize(1200, 800);
@@ -107,6 +110,37 @@ void MainWindow::setupMenuBar() {
   m_adjustmentsAction->setCheckable(true);
   connect(m_adjustmentsAction, &QAction::triggered, this,
           &MainWindow::onToggleAdjustments);
+
+  imageMenu->addSeparator();
+
+  QMenu *filtersMenu = imageMenu->addMenu(tr("&Filters"));
+
+  m_filterGrayscaleAction = filtersMenu->addAction(tr("&Grayscale"));
+  m_filterGrayscaleAction->setEnabled(false);
+  connect(m_filterGrayscaleAction, &QAction::triggered, this,
+          &MainWindow::onFilterGrayscale);
+
+  m_filterSepiaAction = filtersMenu->addAction(tr("&Sepia"));
+  m_filterSepiaAction->setEnabled(false);
+  connect(m_filterSepiaAction, &QAction::triggered, this,
+          &MainWindow::onFilterSepia);
+
+  m_filterInvertAction = filtersMenu->addAction(tr("&Invert"));
+  m_filterInvertAction->setEnabled(false);
+  connect(m_filterInvertAction, &QAction::triggered, this,
+          &MainWindow::onFilterInvert);
+
+  filtersMenu->addSeparator();
+
+  m_filterBlurAction = filtersMenu->addAction(tr("&Blur"));
+  m_filterBlurAction->setEnabled(false);
+  connect(m_filterBlurAction, &QAction::triggered, this,
+          &MainWindow::onFilterBlur);
+
+  m_filterSharpenAction = filtersMenu->addAction(tr("S&harpen"));
+  m_filterSharpenAction->setEnabled(false);
+  connect(m_filterSharpenAction, &QAction::triggered, this,
+          &MainWindow::onFilterSharpen);
 
   imageMenu->addSeparator();
 
@@ -245,7 +279,6 @@ void MainWindow::updateStatusBar() {
 void MainWindow::updateViewActions() {
   bool hasImage = m_canvas->hasImage();
   bool notCropping = !m_canvas->isCropping();
-  bool notAdjusting = !m_canvas->isAdjusting();
 
   m_zoomInAction->setEnabled(hasImage && notCropping);
   m_zoomOutAction->setEnabled(hasImage && notCropping);
@@ -267,6 +300,12 @@ void MainWindow::updateImageActions() {
   m_rotateArbitraryAction->setEnabled(hasImage && notCropping && notAdjusting);
   m_flipHorizontalAction->setEnabled(hasImage && notCropping && notAdjusting);
   m_flipVerticalAction->setEnabled(hasImage && notCropping && notAdjusting);
+
+  m_filterGrayscaleAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_filterSepiaAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_filterInvertAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_filterBlurAction->setEnabled(hasImage && notCropping && notAdjusting);
+  m_filterSharpenAction->setEnabled(hasImage && notCropping && notAdjusting);
 
   if (m_canvas->isCropping()) {
     m_cropAction->setText(tr("&Apply Crop"));
@@ -488,6 +527,26 @@ void MainWindow::onApplyAdjustments() {
 
 void MainWindow::onResetAdjustments() {
   m_canvas->setPreviewAdjustments(0, 0, 0, 0);
+}
+
+void MainWindow::onFilterGrayscale() {
+  m_canvas->applyFilter(ImageCanvas::FilterType::Grayscale);
+}
+
+void MainWindow::onFilterSepia() {
+  m_canvas->applyFilter(ImageCanvas::FilterType::Sepia);
+}
+
+void MainWindow::onFilterInvert() {
+  m_canvas->applyFilter(ImageCanvas::FilterType::Invert);
+}
+
+void MainWindow::onFilterBlur() {
+  m_canvas->applyFilter(ImageCanvas::FilterType::Blur);
+}
+
+void MainWindow::onFilterSharpen() {
+  m_canvas->applyFilter(ImageCanvas::FilterType::Sharpen);
 }
 
 void MainWindow::onZoomIn() { m_canvas->zoomIn(); }
