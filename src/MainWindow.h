@@ -6,6 +6,7 @@
 class ImageCanvas;
 class AdjustmentsPanel;
 class LayersPanel;
+class ColorPanel;
 class QLabel;
 class QAction;
 class QDockWidget;
@@ -63,6 +64,12 @@ private slots:
   void onLayerMoved(int from, int to);
   void onActiveLayerChanged(int index);
 
+  // Tool slots
+  void onToolBrush();
+  void onToolEraser();
+  void onToolNone();
+  void onForegroundColorChanged(const QColor &color);
+
 private:
   void setupMenuBar();
   void setupStatusBar();
@@ -76,8 +83,10 @@ private:
   ImageCanvas *m_canvas;
   AdjustmentsPanel *m_adjustmentsPanel;
   LayersPanel *m_layersPanel;
+  ColorPanel *m_colorPanel;
   QDockWidget *m_adjustmentsDock;
   QDockWidget *m_layersDock;
+  QDockWidget *m_colorDock;
 
   QLabel *m_statusLabel;
   QLabel *m_zoomLabel;
@@ -103,6 +112,9 @@ private:
   QAction *m_filterInvertAction;
   QAction *m_filterBlurAction;
   QAction *m_filterSharpenAction;
+
+  QAction *m_toolBrushAction;
+  QAction *m_toolEraserAction;
 };
 
 #endif

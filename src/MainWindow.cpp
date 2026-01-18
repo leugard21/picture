@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "AdjustmentsPanel.h"
+#include "ColorPanel.h"
 #include "ImageCanvas.h"
 #include "LayersPanel.h"
 #include "ResizeDialog.h"
@@ -17,18 +18,20 @@
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent), m_canvas(new ImageCanvas(this)),
       m_adjustmentsPanel(nullptr), m_layersPanel(nullptr),
-      m_adjustmentsDock(nullptr), m_layersDock(nullptr),
-      m_statusLabel(new QLabel(this)), m_zoomLabel(new QLabel(this)),
-      m_currentFilePath(), m_isModified(false), m_zoomInAction(nullptr),
-      m_zoomOutAction(nullptr), m_fitToWindowAction(nullptr),
-      m_actualSizeAction(nullptr), m_resizeAction(nullptr),
-      m_cropAction(nullptr), m_rotate90CWAction(nullptr),
-      m_rotate90CCWAction(nullptr), m_rotate180Action(nullptr),
-      m_rotateArbitraryAction(nullptr), m_flipHorizontalAction(nullptr),
-      m_flipVerticalAction(nullptr), m_adjustmentsAction(nullptr),
-      m_layersAction(nullptr), m_filterGrayscaleAction(nullptr),
-      m_filterSepiaAction(nullptr), m_filterInvertAction(nullptr),
-      m_filterBlurAction(nullptr), m_filterSharpenAction(nullptr) {
+      m_colorPanel(nullptr), m_adjustmentsDock(nullptr), m_layersDock(nullptr),
+      m_colorDock(nullptr), m_statusLabel(new QLabel(this)),
+      m_zoomLabel(new QLabel(this)), m_currentFilePath(), m_isModified(false),
+      m_zoomInAction(nullptr), m_zoomOutAction(nullptr),
+      m_fitToWindowAction(nullptr), m_actualSizeAction(nullptr),
+      m_resizeAction(nullptr), m_cropAction(nullptr),
+      m_rotate90CWAction(nullptr), m_rotate90CCWAction(nullptr),
+      m_rotate180Action(nullptr), m_rotateArbitraryAction(nullptr),
+      m_flipHorizontalAction(nullptr), m_flipVerticalAction(nullptr),
+      m_adjustmentsAction(nullptr), m_layersAction(nullptr),
+      m_filterGrayscaleAction(nullptr), m_filterSepiaAction(nullptr),
+      m_filterInvertAction(nullptr), m_filterBlurAction(nullptr),
+      m_filterSharpenAction(nullptr), m_toolBrushAction(nullptr),
+      m_toolEraserAction(nullptr) {
   setCentralWidget(m_canvas);
   setMinimumSize(800, 600);
   resize(1200, 800);
@@ -227,6 +230,20 @@ void MainWindow::setupMenuBar() {
   m_actualSizeAction->setEnabled(false);
   connect(m_actualSizeAction, &QAction::triggered, this,
           &MainWindow::onActualSize);
+
+  QMenu *toolsMenu = menuBar()->addMenu(tr("&Tools"));
+
+  m_toolBrushAction = toolsMenu->addAction(tr("&Brush"));
+  m_toolBrushAction->setShortcut(QKeySequence(Qt::Key_B));
+  m_toolBrushAction->setCheckable(true);
+  connect(m_toolBrushAction, &QAction::triggered, this,
+          &MainWindow::onToolBrush);
+
+  m_toolEraserAction = toolsMenu->addAction(tr("&Eraser"));
+  m_toolEraserAction->setShortcut(QKeySequence(Qt::Key_E));
+  m_toolEraserAction->setCheckable(true);
+  connect(m_toolEraserAction, &QAction::triggered, this,
+          &MainWindow::onToolEraser);
 }
 
 void MainWindow::setupStatusBar() {
@@ -299,6 +316,17 @@ void MainWindow::setupDockWidgets() {
 
   connect(m_layersDock, &QDockWidget::visibilityChanged,
           [this](bool visible) { m_layersAction->setChecked(visible); });
+
+  m_colorPanel = new ColorPanel(this);
+  m_colorDock = new QDockWidget(tr("Colors"), this);
+  m_colorDock->setWidget(m_colorPanel);
+  m_colorDock->setAllowedAreas(Qt::LeftDockWidgetArea |
+                               Qt::RightDockWidgetArea);
+  m_colorDock->setVisible(true);
+  addDockWidget(Qt::RightDockWidgetArea, m_colorDock);
+
+  connect(m_colorPanel, &ColorPanel::foregroundColorChanged, this,
+          &MainWindow::onForegroundColorChanged);
 }
 
 void MainWindow::updateWindowTitle() {
@@ -659,4 +687,31 @@ void MainWindow::onLayerMoved(int from, int to) {
 }
 void MainWindow::onActiveLayerChanged(int index) {
   m_layersPanel->selectLayer(index);
+}
+
+// Tool slots
+void MainWindow::onToolBrush()
+{
+    m_canvas->setToolMode(ImageCanvas::ToolMode::Brush);
+    m_toolBrushAction->setChecked(true);
+    m_toolEraserAction->setChecked(false);
+}
+
+void MainWindow::onToolEraser()
+{
+    m_canvas->setToolMode(ImageCanvas::ToolMode::Eraser);
+    m_toolBrushAction->setChecked(false);
+    m_toolEraserAction->setChecked(true);
+}
+
+void MainWindow::onToolNone()
+{
+    m_canvas->setToolMode(ImageCanvas::ToolMode::None);
+    m_toolBrushAction->setChecked(false);
+    m_toolEraserAction->setChecked(false);
+}
+
+void MainWindow::onForegroundColorChanged(const QColor& color)
+{
+    m_canvas->setToolColor(color);
 }

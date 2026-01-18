@@ -1,5 +1,7 @@
 #include "ImageCanvas.h"
+#include "BrushTool.h"
 #include "CropOverlay.h"
+#include "EraserTool.h"
 #include "ImageProcessor.h"
 #include "Layer.h"
 
@@ -19,7 +21,8 @@ ImageCanvas::ImageCanvas(QWidget *parent)
     : QWidget(parent), m_layers(), m_activeLayerIndex(-1),
       m_originalLayerImage(), m_displayPixmap(), m_zoomLevel(1.0),
       m_panOffset(0, 0), m_lastMousePos(), m_isPanning(false),
-      m_isAdjusting(false), m_cropOverlay(nullptr) {
+      m_isAdjusting(false), m_cropOverlay(nullptr), m_toolMode(ToolMode::None),
+      m_activeTool(nullptr), m_isDrawing(false) {
   setMinimumSize(200, 200);
   setAutoFillBackground(true);
   setMouseTracking(true);
@@ -609,6 +612,32 @@ void ImageCanvas::mousePressEvent(QMouseEvent *event) {
     return;
   }
 
+  if (m_activeTool && event->button() == Qt::LeftButton) {
+    auto layer = activeLayer();
+    if (layer) {
+      QRect imageRect = currentImageRect();
+      QPoint canvasPos = event->pos();
+
+      int imgX =
+          static_cast<int>((canvasPos.x() - imageRect.x()) / m_zoomLevel);
+      int imgY =
+          static_cast<int>((canvasPos.y() - imageRect.y()) / m_zoomLevel);
+      QPoint imagePos(imgX, imgY);
+
+      if (imageRect.contains(canvasPos)) {
+        QImage img = layer->image();
+        m_activeTool->onPress(img, imagePos);
+        layer->setImage(img);
+        m_isDrawing = true;
+        updateDisplayPixmap();
+        update();
+        emit imageModified();
+        event->accept();
+        return;
+      }
+    }
+  }
+
   if (event->button() == Qt::LeftButton ||
       event->button() == Qt::MiddleButton) {
     m_isPanning = true;
@@ -621,6 +650,28 @@ void ImageCanvas::mousePressEvent(QMouseEvent *event) {
 }
 
 void ImageCanvas::mouseMoveEvent(QMouseEvent *event) {
+  if (m_isDrawing && m_activeTool) {
+    auto layer = activeLayer();
+    if (layer) {
+      QRect imageRect = currentImageRect();
+      QPoint canvasPos = event->pos();
+
+      int imgX =
+          static_cast<int>((canvasPos.x() - imageRect.x()) / m_zoomLevel);
+      int imgY =
+          static_cast<int>((canvasPos.y() - imageRect.y()) / m_zoomLevel);
+      QPoint imagePos(imgX, imgY);
+
+      QImage img = layer->image();
+      m_activeTool->onMove(img, imagePos);
+      layer->setImage(img);
+      updateDisplayPixmap();
+      update();
+      event->accept();
+      return;
+    }
+  }
+
   if (m_isPanning) {
     QPoint delta = event->pos() - m_lastMousePos;
     m_lastMousePos = event->pos();
@@ -634,6 +685,31 @@ void ImageCanvas::mouseMoveEvent(QMouseEvent *event) {
 }
 
 void ImageCanvas::mouseReleaseEvent(QMouseEvent *event) {
+  if (m_isDrawing && event->button() == Qt::LeftButton) {
+    if (m_activeTool) {
+      auto layer = activeLayer();
+      if (layer) {
+        QRect imageRect = currentImageRect();
+        QPoint canvasPos = event->pos();
+
+        int imgX =
+            static_cast<int>((canvasPos.x() - imageRect.x()) / m_zoomLevel);
+        int imgY =
+            static_cast<int>((canvasPos.y() - imageRect.y()) / m_zoomLevel);
+        QPoint imagePos(imgX, imgY);
+
+        QImage img = layer->image();
+        m_activeTool->onRelease(img, imagePos);
+        layer->setImage(img);
+        updateDisplayPixmap();
+        update();
+      }
+    }
+    m_isDrawing = false;
+    event->accept();
+    return;
+  }
+
   if (m_isPanning && (event->button() == Qt::LeftButton ||
                       event->button() == Qt::MiddleButton)) {
     m_isPanning = false;
@@ -738,3 +814,54 @@ void ImageCanvas::updateCropOverlay() {
     m_cropOverlay->setImageRect(currentImageRect());
   }
 }
+
+// Tool methods implementation
+void ImageCanvas::setToolMode(ToolMode mode)
+{
+    if (m_toolMode == mode) return;
+    
+    m_toolMode = mode;
+    m_isDrawing = false;
+    
+    // Create appropriate tool instance
+    switch (mode) {
+    case ToolMode::Brush:
+        m_activeTool = std::make_unique<BrushTool>();
+        break;
+    case ToolMode::Eraser:
+        m_activeTool = std::make_unique<EraserTool>();
+        break;
+    case ToolMode::None:
+    default:
+        m_activeTool.reset();
+        break;
+    }
+}
+
+ImageCanvas::ToolMode ImageCanvas::toolMode() const
+{
+    return m_toolMode;
+}
+
+void ImageCanvas::setToolColor(const QColor& color)
+{
+    if (m_activeTool) {
+        m_activeTool->setColor(color);
+    }
+}
+
+void ImageCanvas::setToolSize(int size)
+{
+    if (m_activeTool) {
+        m_activeTool->setSize(size);
+    }
+}
+
+void ImageCanvas::setToolOpacity(qreal opacity)
+{
+    if (m_activeTool) {
+        m_activeTool->setOpacity(opacity);
+    }
+}
+
+ImageCanvas::~ImageCanvas() = default;

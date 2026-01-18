@@ -9,6 +9,7 @@
 
 class CropOverlay;
 class Layer;
+class DrawingTool;
 
 class ImageCanvas : public QWidget {
   Q_OBJECT
@@ -19,9 +20,10 @@ public:
   static constexpr qreal ZoomStep = 1.25;
 
   enum class FilterType { Grayscale, Sepia, Invert, Blur, Sharpen };
+  enum class ToolMode { None, Brush, Eraser };
 
   explicit ImageCanvas(QWidget *parent = nullptr);
-  ~ImageCanvas() override = default;
+  ~ImageCanvas() override;
 
   bool loadProject(const QString &path);
   bool saveProject(const QString &path);
@@ -77,6 +79,12 @@ public:
 
   void applyFilter(FilterType type);
 
+  void setToolMode(ToolMode mode);
+  ToolMode toolMode() const;
+  void setToolColor(const QColor &color);
+  void setToolSize(int size);
+  void setToolOpacity(qreal opacity);
+
 signals:
   void imageLoaded(const QString &path);
   void imageSaved(const QString &path);
@@ -117,6 +125,10 @@ private:
   bool m_isPanning;
   bool m_isAdjusting;
   CropOverlay *m_cropOverlay;
+
+  ToolMode m_toolMode;
+  std::unique_ptr<DrawingTool> m_activeTool;
+  bool m_isDrawing;
 };
 
 #endif

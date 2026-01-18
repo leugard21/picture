@@ -27,6 +27,10 @@ set(SOURCES
     src/AdjustmentsPanel.cpp
     src/Layer.cpp
     src/LayersPanel.cpp
+    src/DrawingTool.cpp
+    src/BrushTool.cpp
+    src/EraserTool.cpp
+    src/ColorPanel.cpp
 )
 
 set(HEADERS
@@ -39,6 +43,10 @@ set(HEADERS
     src/AdjustmentsPanel.h
     src/Layer.h
     src/LayersPanel.h
+    src/DrawingTool.h
+    src/BrushTool.h
+    src/EraserTool.h
+    src/ColorPanel.h
 )
 
 add_executable(${PROJECT_NAME}
